@@ -1,14 +1,14 @@
 "use client";
 import React from 'react'
-import { User, SubscriptionStatus } from "@prisma/client"
 import { Button } from '@/components/ui/button'
 import { useRouter } from 'next/navigation';
 
-interface SettingsFormProps {
-	user: User;
+/** Prisma はサーバー専用のため、クライアントでは文字列で受け取る */
+interface SubscriptionSettingsFormProps {
+	subscriptionStatus: string;
 }
 
-const SubscriptionSettingsForm = ({user}: SettingsFormProps) => {
+const SubscriptionSettingsForm = ({ subscriptionStatus }: SubscriptionSettingsFormProps) => {
   const router = useRouter();
 
   const handleManageSubscription = async () => {
@@ -25,10 +25,12 @@ const SubscriptionSettingsForm = ({user}: SettingsFormProps) => {
 	}
   };
 
+  const isFree = subscriptionStatus === "FREE";
+
   return (
     <div className="grid gap-4 p-4 border-2 rounded-lg">
 		<div className="grid gap-2">
-            {user.subscriptionStatus !== SubscriptionStatus.FREE ? (
+            {!isFree ? (
 				<>
 				  <p className="text-sm text-muted-foreground">
 					現在のサブスクリプションを管理します
