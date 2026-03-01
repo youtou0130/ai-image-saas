@@ -1,5 +1,4 @@
 import React from 'react'
-import { SubscriptionStatus } from '@prisma/client';
 import { format } from 'date-fns';
 
 interface ProfileSectionProps {
