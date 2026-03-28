@@ -3,8 +3,20 @@ import Stripe from "stripe";
 import { SubscriptionStatus } from "@prisma/client";
 import { STRIPE_PLANS } from "@/config/plans";
 
+function stripeCustomerId(subscription: Stripe.Subscription): string | undefined {
+	const c = subscription.customer;
+	if (typeof c === "string") return c;
+	if (c && typeof c === "object" && "deleted" in c && c.deleted) return undefined;
+	if (c && typeof c === "object" && "id" in c) return c.id;
+	return undefined;
+}
+
 function getPlanDetails(subscription: Stripe.Subscription){
-    const priceId = subscription.items.data[0].price.id;
+	const first = subscription.items.data[0];
+	if (!first) {
+		throw new Error("Subscription has no line items");
+	}
+    const priceId = first.price.id;
 	let status: SubscriptionStatus = "FREE";
 	let credits = 5;
 	
@@ -30,19 +42,30 @@ export async function handleSubscriptionCreated(
 	subscription: Stripe.Subscription
 ){
     const { priceId, status, credits } = getPlanDetails(subscription);
+	const customerId = stripeCustomerId(subscription);
+	if (!customerId) {
+		throw new Error("Subscription missing customer id");
+	}
+	const periodEnd = new Date(subscription.items.data[0].current_period_end * 1000);
 
     return prisma.user.update({
-		where: { stripeCustomerId: subscription.customer as string },
+		where: { stripeCustomerId: customerId },
 		data: {
 			subscriptionStatus: status,
 			credits: credits,
 			subscriptions: {
-				create: {
-					stripeSubscriptionId: subscription.id,
-					stripePriceId: priceId,
-					stripeCurrentPeriodEnd: new Date(subscription.items.data[0].current_period_end * 1000),
-				}
-			}
+				upsert: {
+					create: {
+						stripeSubscriptionId: subscription.id,
+						stripePriceId: priceId,
+						stripeCurrentPeriodEnd: periodEnd,
+					},
+					update: {
+						stripePriceId: priceId,
+						stripeCurrentPeriodEnd: periodEnd,
+					},
+				},
+			},
 		},
 	})
 }
@@ -52,19 +75,34 @@ export async function handleSubscriptionUpdated(
 	subscription: Stripe.Subscription
 ){
     const { priceId, status, credits } = getPlanDetails(subscription);
+	const customerId = stripeCustomerId(subscription);
+	if (!customerId) {
+		throw new Error("Subscription missing customer id");
+	}
+	const periodEnd = new Date(subscription.items.data[0].current_period_end * 1000);
+	const effectiveStatus = subscription.cancel_at_period_end
+		? SubscriptionStatus.FREE
+		: status;
+	const effectiveCredits = subscription.cancel_at_period_end ? 0 : credits;
 
     return prisma.user.update({
-		where: { stripeCustomerId: subscription.customer as string },
+		where: { stripeCustomerId: customerId },
 		data: {
-			subscriptionStatus: subscription.cancel_at_period_end ? SubscriptionStatus.FREE : status,
-			credits: subscription.cancel_at_period_end ? 0 : credits,
+			subscriptionStatus: effectiveStatus,
+			credits: effectiveCredits,
 			subscriptions: {
-				update: {
-					stripeSubscriptionId: subscription.id,
-					stripePriceId: priceId,
-					stripeCurrentPeriodEnd: new Date(subscription.items.data[0].current_period_end * 1000),
-				}
-			}
+				upsert: {
+					create: {
+						stripeSubscriptionId: subscription.id,
+						stripePriceId: priceId,
+						stripeCurrentPeriodEnd: periodEnd,
+					},
+					update: {
+						stripePriceId: priceId,
+						stripeCurrentPeriodEnd: periodEnd,
+					},
+				},
+			},
 		},
 	})
 }
@@ -73,16 +111,18 @@ export async function handleSubscriptionUpdated(
 export async function handleSubscriptionDeleted(
 	subscription: Stripe.Subscription
 ){
+	const customerId = stripeCustomerId(subscription);
+	if (!customerId) {
+		throw new Error("Subscription missing customer id");
+	}
     return prisma.user.update({
-		where: { stripeCustomerId: subscription.customer as string },
+		where: { stripeCustomerId: customerId },
 		data: {
 			subscriptionStatus: SubscriptionStatus.FREE,
 			credits: 0,
 			subscriptions: {
-				delete: {
-					stripeSubscriptionId: subscription.id,
-				}
-			}
+				delete: true,
+			},
 		},
 	})
 }
